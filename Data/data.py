@@ -163,7 +163,11 @@ class DataGenerator(tf.keras.utils.Sequence):
     def make_segment_inputs(self, batch_token_id):
         segment_inputs = []
         for i in range(len(batch_token_id)):
-            separate_index = batch_token_id[i].index(self.corpus.vocab2id['SEP'])
+            try:
+                separate_index = batch_token_id[i].index(self.corpus.vocab2id['SEP'])
+            except ValueError:
+                separate_index = len(batch_token_id[i]) - 1
+                # 这句话太长了，256个都属于这句话。目测是！？等没用来做分割。
             one_segment_inputs = [0] * (separate_index + 1) + [1] * (self.config['Max_Sequence_Length'] - separate_index - 1)
             segment_inputs.append(one_segment_inputs)
         segment_inputs = np.array(segment_inputs)
