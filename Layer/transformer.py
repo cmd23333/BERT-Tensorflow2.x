@@ -1,87 +1,104 @@
 import tensorflow as tf
 
 
+def scaled_dot_product_attention(q, k, v, mask):
+    """计算注意力权重。
+    q, k, v 必须具有匹配的前置维度。
+    k, v 必须有匹配的倒数第二个维度，例如：seq_len_k = seq_len_v。
+    mask 必须能进行广播转换以便求和。
+
+    参数:
+      q: 请求的形状 == (..., seq_len_q, depth)
+      k: 主键的形状 == (..., seq_len_k, depth)
+      v: 数值的形状 == (..., seq_len_v, depth_v)
+      mask: Float 张量，其形状能转换成
+            (..., seq_len_q, seq_len_k)。默认为None。
+
+    返回值:
+      输出，注意力权重
+    """
+
+    matmul_qk = tf.matmul(q, k, transpose_b=True)  # (..., seq_len_q, seq_len_k)
+    # 缩放 matmul_qk
+    dk = tf.cast(tf.shape(k)[-1], tf.float32)
+    scaled_attention_logits = matmul_qk / tf.math.sqrt(dk)
+    # 将 mask 加入到缩放的张量上。
+    if mask is not None:
+        scaled_attention_logits + (tf.cast(mask[:, tf.newaxis, tf.newaxis, :], dtype=tf.float32) * -1e9)
+    # softmax 在最后一个轴seq_len_k上归一化，因此分数相加等于1。
+    attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
+    output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
+    return output, attention_weights
+
+
 class MultiHeadAttention(tf.keras.layers.Layer):
-    """多头注意力"""
-    def __init__(self, heads, head_size, key_size=None, initializer='glorot_uniform', **kwargs):
-        super(MultiHeadAttention, self).__init__(**kwargs)
-        self.heads = heads
-        self.head_size = head_size
-        self.out_dim = heads * head_size
-        self.key_size = key_size if key_size else head_size
-        self.kernel_initializer = tf.keras.initializers.get(initializer)
+    def __init__(self, d_model, num_heads):
+        super(MultiHeadAttention, self).__init__()
+        self.num_heads = num_heads
+        self.d_model = d_model
+        assert d_model % self.num_heads == 0
 
-    def build(self, input_shape):
-        super(MultiHeadAttention, self).build(input_shape)
-        self.wq = tf.keras.layers.Dense(units=self.heads*self.key_size, kernel_initializer=self.kernel_initializer)
-        self.wk = tf.keras.layers.Dense(units=self.heads*self.key_size, kernel_initializer=self.kernel_initializer)
-        self.wv = tf.keras.layers.Dense(units=self.heads*self.head_size, kernel_initializer=self.kernel_initializer)
-        self.wo = tf.keras.layers.Dense(units=self.out_dim, kernel_initializer=self.kernel_initializer)
+        self.depth = d_model // self.num_heads
 
-    def call(self, q, k, v, att_mask=None):
-        # 先按需计算mask，这里是可以个人定制的
-        if att_mask is not None:
-            pass
+        self.wq = tf.keras.layers.Dense(d_model)
+        self.wk = tf.keras.layers.Dense(d_model)
+        self.wv = tf.keras.layers.Dense(d_model)
 
-        # 输入的x值通过三个不同的dense之后得到q, k, v
-        q = self.wq(q)  # [b, l, n*k]
-        k = self.wk(k)  # [b, l, n*k]
-        v = self.wv(v)  # [b, l, n*h]
+        self.dense = tf.keras.layers.Dense(d_model)
 
-        # b: batch_size, n: num of heads, l: seq_length,
-        # k: key_size, h: head_size (不额外设定时，h = k)
-        # reshape, [b, l, n*h] → [b, l, n, h]
-        q = tf.reshape(q, [-1, tf.shape(q)[1], self.heads, self.key_size])
-        k = tf.reshape(k, [-1, tf.shape(k)[1], self.heads, self.key_size])
-        v = tf.reshape(v, [- 1, tf.shape(v)[1], self.heads, self.head_size])
+    def split_heads(self, x, batch_size):
+        """分拆最后一个维度到 (num_heads, depth).
+        转置结果使得形状为 (batch_size, num_heads, seq_len, depth)
+        """
+        x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
+        return tf.transpose(x, perm=[0, 2, 1, 3])
 
-        # attention：qk点积、padding_mask与att_mask、softmax
-        a = tf.einsum('binh,bjnh->bnij', q, k) / self.key_size**0.5
-        a = tf.nn.softmax(a)
+    def call(self, v, k, q, mask):
+        batch_size = tf.shape(q)[0]
 
-        # softmax值与v做加权平均，输出形状设置成和输入类似
-        o = tf.einsum('bnij,bjnh->binh', a, v)
-        o = tf.reshape(o, (-1, tf.shape(o)[1], self.out_dim))
-        o = self.wo(o)
+        q = self.wq(q)  # (batch_size, seq_len, d_model)
+        k = self.wk(k)  # (batch_size, seq_len, d_model)
+        v = self.wv(v)  # (batch_size, seq_len, d_model)
 
-        return o
+        q = self.split_heads(q, batch_size)  # (batch_size, num_heads, seq_len_q, depth)
+        k = self.split_heads(k, batch_size)  # (batch_size, num_heads, seq_len_k, depth)
+        v = self.split_heads(v, batch_size)  # (batch_size, num_heads, seq_len_v, depth)
+
+        # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
+        # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
+        scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
+        # (batch_size, seq_len_q, num_heads, depth)
+        scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
+        # (batch_size, seq_len_q, d_model)
+        concat_attention = tf.reshape(scaled_attention, (batch_size, -1, self.d_model))
+
+        output = self.dense(concat_attention)  # (batch_size, seq_len_q, d_model
+        return output, attention_weights
 
 
 class Transformer(tf.keras.layers.Layer):
+    def __init__(self, d_model, num_heads, dff, rate=0.1):
+        super(Transformer, self).__init__()
 
-    def __init__(self, heads, head_size, intermediate_size, initializer='glorot_uniform', **kwargs):
-        super(Transformer, self).__init__(**kwargs)
-        self.heads = heads
-        self.head_size = head_size
-        self.intermediate_size = intermediate_size  # feed-forward的隐层维度
-        self.kernel_initializer = tf.keras.initializers.get(initializer)
+        self.mha = MultiHeadAttention(d_model, num_heads)
+        self.ffn = tf.keras.Sequential([
+            tf.keras.layers.Dense(dff, activation='relu'),  # (batch_size, seq_len, dff)
+            tf.keras.layers.Dense(d_model)  # (batch_size, seq_len, d_model)
+        ])
 
-    def build(self, input_shape):
-        super(Transformer, self).build(input_shape)
-        self.mha = MultiHeadAttention(heads=self.heads, head_size=self.head_size)
-        self.add = tf.keras.layers.Add()
-        self.ln = tf.keras.layers.LayerNormalization()
-        self.ff_dense1 = tf.keras.layers.Dense(units=self.intermediate_size,
-                                               activation='relu',
-                                               kernel_initializer=self.kernel_initializer)
-        self.ff_dense2 = tf.keras.layers.Dense(units=self.heads * self.head_size,
-                                               activation='relu',
-                                               kernel_initializer=self.kernel_initializer)
+        self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
+        self.layernorm2 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
 
-    def call(self, inputs, att_mask=None):
-        # 多头注意力
-        x0 = self.mha(inputs, inputs, inputs, att_mask=att_mask)
-        # 残差连接
-        x0 = self.add([x0, inputs])
-        # layer normalization
-        x0 = self.ln(x0)
-        # feed-forward 实际为两层dense，第二层dense输出维度可以设置，但一般和前面的输出一样，就取了n*h
-        x1 = self.ff_dense1(x0)
-        x1 = self.ff_dense2(x1)
-        # 残差连接
-        x1 = self.add([x1, x0])
-        # layer normalization
-        x1 = self.ln(x1)
-        return x1
+        self.dropout1 = tf.keras.layers.Dropout(rate)
+        self.dropout2 = tf.keras.layers.Dropout(rate)
 
+    def call(self, x, mask, training=None):
+        attn_output, _ = self.mha(x, x, x, mask)  # (batch_size, input_seq_len, d_model)
+        attn_output = self.dropout1(attn_output, training=training)
+        out1 = self.layernorm1(x + attn_output)  # (batch_size, input_seq_len, d_model)
 
+        ffn_output = self.ffn(out1)  # (batch_size, input_seq_len, d_model)
+        ffn_output = self.dropout2(ffn_output, training=training)
+        out2 = self.layernorm2(out1 + ffn_output)  # (batch_size, input_seq_len, d_model)
+
+        return out2
