@@ -30,7 +30,7 @@ manager = tf.train.CheckpointManager(checkpoint, directory=Config['Saved_Weight'
 log_dir = os.path.join(Config['Log_Dir'], datetime.now().strftime("%Y-%m-%d"))
 writer = tf.summary.create_file_writer(log_dir)
 
-EPOCH = 10000
+EPOCH = 100
 
 for epoch in range(EPOCH):
     for step in range(len(dataset)):

@@ -25,7 +25,7 @@ class BertLoss(tf.keras.layers.Layer):
         mlm_acc = correct_num / mask_position.shape[0]
 
         nsp_predict = tf.math.argmax(nsp_pred, axis=-1, output_type=tf.int32)
-        correct_nsp_num = tf.reduce_sum(tf.cast(nsp_predict == mask_real, dtype=tf.int32))
+        correct_nsp_num = tf.reduce_sum(tf.cast(nsp_predict == batch_y, dtype=tf.int32))
         nsp_acc = correct_nsp_num / len(batch_y)
 
         return mlm_loss, nsp_loss, mlm_acc, nsp_acc
