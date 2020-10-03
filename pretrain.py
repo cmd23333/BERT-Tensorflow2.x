@@ -47,11 +47,11 @@ for epoch in range(EPOCH):
             print('nsp_loss {:.4f}, nsp_acc {:.2f}'.format(nsp_loss.numpy(), nsp_acc.numpy()))
 
         with writer.as_default():
-            tf.summary.scalar('train_loss', loss.numpy())
-            tf.summary.scalar('mlm_loss', mlm_loss.numpy())
-            tf.summary.scalar('nsp_loss', nsp_loss.numpy())
-            tf.summary.scalar('mlm_accuracy', mlm_acc.numpy())
-            tf.summary.scalar('nsp_accuracy', nsp_acc.numpy())
+            tf.summary.scalar('train_loss', loss.numpy(), step=epoch*len(dataset) + step)
+            tf.summary.scalar('mlm_loss', mlm_loss.numpy(), step=epoch*len(dataset) + step)
+            tf.summary.scalar('nsp_loss', nsp_loss.numpy(), step=epoch*len(dataset) + step)
+            tf.summary.scalar('mlm_accuracy', mlm_acc.numpy(), step=epoch*len(dataset) + step)
+            tf.summary.scalar('nsp_accuracy', nsp_acc.numpy(), step=epoch*len(dataset) + step)
 
     path = manager.save(checkpoint_number=epoch)
     print('model saved to %s' % path)
