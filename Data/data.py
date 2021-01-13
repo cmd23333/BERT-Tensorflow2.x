@@ -5,6 +5,26 @@ import numpy as np
 from config import Config
 
 
+class Tokenizer:
+    def __init__(self, config):
+        with open(config['Vocabulary_File_Path'], 'r', encoding='utf-8') as f:
+            self.dict = ['CLS', 'SEP', 'MASK', 'PAD', 'UNK'] + eval(f.read())
+        self.word2id = {self.dict[i]: i for i in range(len(self.dict))}
+        self.id2word = {i: self.dict[i] for i in range(len(self.dict))}
+
+        self._token_start_id = self.word2id['CLS']
+        self._token_end_id = self.word2id['SEP']
+        self._token_mask_id = self.word2id['MASK']
+
+    def encode(self, text):
+        token_ids = [self._token_start_id] + [self.word2id[char] for char in text] + [self._token_end_id]
+        segment_ids = [0 for char in text]
+        return token_ids, segment_ids
+
+    def decode(self, ids):
+        return self.id2word[ids]
+
+
 class Corpus:
 
     def __init__(self, config):
@@ -58,7 +78,8 @@ class Corpus:
                     name = passage[name_index + 4:region_index].strip('\n')  # 菲奥娜
                     region = passage[region_index + 5:story_index].strip('\n')  # 德玛西亚
                     story = passage[story_index + 3:].strip('\n')  # ...
-                    yield story
+                    for i in range(10):
+                        yield story
 
                 elif passage.startswith('地区'):
                     '''
@@ -69,13 +90,15 @@ class Corpus:
                     story_index = passage.index('地区简介')
                     name = passage[3:story_index].strip('\n')
                     story = passage[story_index + 5:].strip('\n')
-                    yield story
+                    for i in range(10):
+                        yield story
 
     def make_bert_data(self):
         passages = self.make_and_parse_passages()
         for story in passages:
             sentences = story.strip('。').split('。')
             if len(sentences) == 1:
+                # 目前没有这种情况。
                 print('这段话只有一句话，搞不了。')
                 continue
             for i in range(len(sentences) - 1):
@@ -185,12 +208,13 @@ class DataGenerator(tf.keras.utils.Sequence):
         is_next_sentence = np.array([1, 0] * (self.batch_size // 2))
         shuffle = np.random.choice(np.arange(self.batch_size), size=self.batch_size, replace=False)
         # 返回6个东西，分别是mask后的句子,分句位置,补零位置; 原始句子,mask的位置,是否是下一句
-        return [batch_x[shuffle], segment_x[shuffle], padding_mask[shuffle],
-                np.array(batch_data)[shuffle], batch_mlm_mask[shuffle], is_next_sentence[shuffle]]
+        batch_x, batch_segment, batch_padding_mask = batch_x[shuffle], segment_x[shuffle], padding_mask[shuffle]
+        origin_x, batch_mlm_mask, batch_y = np.array(batch_data)[shuffle], batch_mlm_mask[shuffle], is_next_sentence[shuffle]
+        return batch_x, batch_mlm_mask, origin_x, batch_segment, batch_padding_mask, batch_y
 
 
 if __name__ == '__main__':
     dataset = DataGenerator(Config)
-    batch_x, batch_segment, batch_padding_mask, origin_x, batch_mask, batch_y = dataset[3]
+    batch_x,  batch_mlm_mask, origin_x, batch_segment, batch_padding_mask, batch_y = dataset[3]
     print(dataset.corpus.token_id_to_word_list(list(batch_x[0])))
     print(batch_y[0])

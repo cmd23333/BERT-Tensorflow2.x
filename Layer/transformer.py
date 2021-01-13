@@ -53,27 +53,27 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
         return tf.transpose(x, perm=[0, 2, 1, 3])
 
-    def call(self, v, k, q, mask):
-        batch_size = tf.shape(q)[0]
+    def call(self, x, mask):
+        batch_size = tf.shape(x)[0]
 
-        q = self.wq(q)  # (batch_size, seq_len, d_model)
-        k = self.wk(k)  # (batch_size, seq_len, d_model)
-        v = self.wv(v)  # (batch_size, seq_len, d_model)
+        query = self.wq(x)  # (batch_size, seq_len, d_model)
+        key = self.wk(x)  # (batch_size, seq_len, d_model)
+        value = self.wv(x)  # (batch_size, seq_len, d_model)
 
-        q = self.split_heads(q, batch_size)  # (batch_size, num_heads, seq_len_q, depth)
-        k = self.split_heads(k, batch_size)  # (batch_size, num_heads, seq_len_k, depth)
-        v = self.split_heads(v, batch_size)  # (batch_size, num_heads, seq_len_v, depth)
+        query = self.split_heads(query, batch_size)  # (batch_size, num_heads, seq_len_q, depth)
+        key = self.split_heads(key, batch_size)  # (batch_size, num_heads, seq_len_k, depth)
+        value = self.split_heads(value, batch_size)  # (batch_size, num_heads, seq_len_v, depth)
 
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
-        scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
+        scaled_attention, attention_weights = scaled_dot_product_attention(query, key, value, mask)
         # (batch_size, seq_len_q, num_heads, depth)
         scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])
         # (batch_size, seq_len_q, d_model)
         concat_attention = tf.reshape(scaled_attention, (batch_size, -1, self.d_model))
 
         output = self.dense(concat_attention)  # (batch_size, seq_len_q, d_model
-        return output, attention_weights
+        return output
 
 
 class Transformer(tf.keras.layers.Layer):
@@ -93,7 +93,7 @@ class Transformer(tf.keras.layers.Layer):
         self.dropout2 = tf.keras.layers.Dropout(rate)
 
     def call(self, x, mask, training=None):
-        attn_output, _ = self.mha(x, x, x, mask)  # (batch_size, input_seq_len, d_model)
+        attn_output = self.mha(x, mask)  # (batch_size, input_seq_len, d_model)
         attn_output = self.dropout1(attn_output, training=training)
         out1 = self.layernorm1(x + attn_output)  # (batch_size, input_seq_len, d_model)
 

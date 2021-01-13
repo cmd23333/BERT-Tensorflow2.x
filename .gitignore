@@ -127,3 +127,9 @@ dmypy.json
 
 /Saved_Weight/
 /Logs/
+/CWS/
+
+/Data/lol_corpus_segment.txt
+/Data/lol_corpus_segment_simplified.txt
+/Saved_Weight_256d_3t/
+/Saved_Weight_256d_6t/
